@@ -1,0 +1,65 @@
+{
+  "name": "@fairfox/write-to-clipboard",
+  "version": "1.0.0",
+  "description": "Comprehensive clipboard utilities with multiple fallback methods for maximum browser compatibility",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --format esm --target browser && bun run build:types",
+    "build:types": "tsc --declaration --emitDeclarationOnly --outDir dist --skipLibCheck src/index.ts",
+    "test": "bun test src",
+    "test:coverage": "bun test src --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "serve": "bunx serve -l 8347 .",
+    "lint": "biome lint src",
+    "lint:fix": "biome lint src --write",
+    "fmt:fix": "biome format src --write",
+    "fmt": "biome format src",
+    "typecheck": "bunx tsc --noEmit",
+    "check": "biome check src",
+    "check:fix": "biome check src --write",
+    "all": "bun run fmt:fix && bun run lint:fix && bun run check:fix && bun run typecheck && bun run test:coverage",
+    "prepublishOnly": "bun run typecheck && bun run check && bun run test && bun run build",
+    "publish:public": "npm publish --access public"
+  },
+  "keywords": [
+    "clipboard",
+    "copy",
+    "browser",
+    "utilities",
+    "fallback",
+    "compatibility"
+  ],
+  "author": "Alex Jeffcott",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alexjeffcott/write-to-clipboard"
+  },
+  "bugs": {
+    "url": "https://github.com/alexjeffcott/write-to-clipboard/issues"
+  },
+  "homepage": "https://github.com/alexjeffcott/write-to-clipboard#readme",
+  "devDependencies": {
+    "@biomejs/biome": "^1.8.0",
+    "@playwright/test": "^1.54.2",
+    "@types/bun": "^1.2.19"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
