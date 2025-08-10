@@ -43,8 +43,8 @@ export class ClipboardManager {
     options: ClipboardOptions = {},
   ): Promise<ClipboardResult> {
     // Detect Chrome extension context and optimize for it
-    const isExtensionContext = typeof globalThis.chrome !== 'undefined' && 
-                              globalThis.chrome?.runtime?.id
+    const isExtensionContext =
+      typeof globalThis.chrome !== 'undefined' && globalThis.chrome?.runtime?.id
     const {
       identifier,
       timeout = 5000,
@@ -77,17 +77,19 @@ export class ClipboardManager {
     }
 
     // Optimize method order for extension contexts to prevent stack overflow
-    const methods = isExtensionContext ? [
-      { name: 'navigator.clipboard', fn: this.writeWithClipboardAPI },
-      { name: 'extension-fallback', fn: this.writeWithExtensionFallback },
-      { name: 'execCommand', fn: this.writeWithExecCommand },
-      { name: 'webkit-fallback', fn: this.writeWithWebKitFallback },
-    ] : [
-      { name: 'navigator.clipboard', fn: this.writeWithClipboardAPI },
-      { name: 'execCommand', fn: this.writeWithExecCommand },
-      { name: 'webkit-fallback', fn: this.writeWithWebKitFallback },
-      { name: 'extension-fallback', fn: this.writeWithExtensionFallback },
-    ]
+    const methods = isExtensionContext
+      ? [
+          { name: 'navigator.clipboard', fn: this.writeWithClipboardAPI },
+          { name: 'extension-fallback', fn: this.writeWithExtensionFallback },
+          { name: 'execCommand', fn: this.writeWithExecCommand },
+          { name: 'webkit-fallback', fn: this.writeWithWebKitFallback },
+        ]
+      : [
+          { name: 'navigator.clipboard', fn: this.writeWithClipboardAPI },
+          { name: 'execCommand', fn: this.writeWithExecCommand },
+          { name: 'webkit-fallback', fn: this.writeWithWebKitFallback },
+          { name: 'extension-fallback', fn: this.writeWithExtensionFallback },
+        ]
 
     for (const method of methods) {
       try {
@@ -193,17 +195,13 @@ export class ClipboardManager {
     }
 
     // For extension contexts, use direct approach to avoid Promise chain recursion
-    const isExtensionContext = typeof globalThis.chrome !== 'undefined' && 
-                              globalThis.chrome?.runtime?.id
+    const isExtensionContext =
+      typeof globalThis.chrome !== 'undefined' && globalThis.chrome?.runtime?.id
 
     if (isExtensionContext) {
       // Direct call without additional Promise wrapping to prevent stack overflow
-      try {
-        await navigator.clipboard.writeText(text)
-        return { success: true }
-      } catch (error) {
-        throw error
-      }
+      await navigator.clipboard.writeText(text)
+      return { success: true }
     }
 
     if (signal) {
@@ -525,8 +523,12 @@ export class ClipboardManager {
 // Default instance for convenience
 export const clipboard = new ClipboardManager()
 
-// Export for backwards compatibility - avoid .bind() to prevent stack overflow in extensions
-export const writeToClipboard = (text: string, options?: ClipboardOptions) => 
-  clipboard.writeToClipboard(text, options)
+// Export for backwards compatibility - create direct function to prevent stack overflow in extensions
+export function writeToClipboard(
+  text: string,
+  options?: ClipboardOptions,
+): Promise<ClipboardResult> {
+  return clipboard.writeToClipboard(text, options)
+}
 
 export default clipboard

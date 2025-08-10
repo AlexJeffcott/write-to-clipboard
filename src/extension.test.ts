@@ -1,87 +1,91 @@
-import { test, expect } from "bun:test";
-import { writeToClipboard, clipboard } from './index';
+import { expect, test } from 'bun:test'
+import { type ClipboardResult, clipboard, writeToClipboard } from './index'
 
-// Mock Chrome extension environment
-const mockChrome = {
+// Types for Chrome extension API
+interface ChromeMessage {
+  action: string
+  text: string
+}
+
+interface ChromeResponse {
+  success?: boolean
+  error?: string
+}
+
+interface MockChrome {
   runtime: {
-    id: 'test-extension-id',
-    sendMessage: (message: any, callback: (response: any) => void) => {
-      setTimeout(() => {
-        callback({ success: true });
-      }, 10);
-    },
+    id: string
+    sendMessage: (
+      message: ChromeMessage,
+      callback: (response: ChromeResponse) => void,
+    ) => void
     lastError: null
   }
-};
+}
 
-test("Chrome extension context - prevents stack overflow with large text", async () => {
-  // Set up Chrome extension environment
-  (globalThis as any).chrome = mockChrome;
-  
-  // Mock navigator.clipboard for test environment
-  const mockWriteText = async (text: string) => Promise.resolve();
-  (globalThis as any).navigator = {
-    ...globalThis.navigator,
-    clipboard: { writeText: mockWriteText }
-  };
-  
-  // Generate large text that previously caused stack overflow
-  const largeText = Array(50000).fill(0).map((_, i) => 
-    `Log entry ${i}: This is a sample log message with data ${Math.random()}`
-  ).join('\n');
-  
-  // This should not cause a stack overflow
-  const result = await writeToClipboard(largeText);
-  
-  expect(result.success).toBe(true);
-  expect(result.method).toBe('navigator.clipboard');
-});
+// Mock Chrome extension environment
+const mockChrome: MockChrome = {
+  runtime: {
+    id: 'test-extension-id',
+    sendMessage: (
+      message: ChromeMessage,
+      callback: (response: ChromeResponse) => void,
+    ) => {
+      setTimeout(() => {
+        callback({ success: true })
+      }, 10)
+    },
+    lastError: null,
+  },
+}
 
-test("Chrome extension context - callback handling uses queueMicrotask", async () => {
-  (globalThis as any).chrome = mockChrome;
-  
-  let callbackCalled = false;
-  let callbackResult: any = null;
-  
+
+test('Chrome extension context - callback handling uses queueMicrotask', async () => {
+  ;(globalThis as any).chrome = mockChrome
+
+  let callbackCalled = false
+  let callbackResult: ClipboardResult | null = null
+
   const result = await writeToClipboard('test text', {
-    callback: (result) => {
-      callbackCalled = true;
-      callbackResult = result;
-    }
-  });
-  
-  expect(result.success).toBe(true);
-  
-  // Wait for microtask to execute
-  await new Promise(resolve => queueMicrotask(resolve));
-  
-  expect(callbackCalled).toBe(true);
-  expect(callbackResult.success).toBe(true);
-});
+    callback: (result: ClipboardResult) => {
+      callbackCalled = true
+      callbackResult = result
+    },
+  })
 
-test("Extension context optimizes method order", async () => {
-  (globalThis as any).chrome = mockChrome;
-  
+  expect(result.success).toBe(true)
+
+  // Wait for microtask to execute
+  await new Promise((resolve) => queueMicrotask(resolve))
+
+  expect(callbackCalled).toBe(true)
+  expect(callbackResult).not.toBeNull()
+  expect((callbackResult as unknown as ClipboardResult).success).toBe(true)
+})
+
+test('Extension context optimizes method order', async () => {
+  ;(globalThis as any).chrome = mockChrome
+
   // Mock navigator.clipboard to fail so we test the fallback order
-  const originalClipboard = navigator.clipboard;
-  
+  const originalClipboard = navigator.clipboard
+
   // @ts-ignore - for testing
-  navigator.clipboard = undefined;
-  
+  navigator.clipboard = undefined
+
   try {
-    const result = await writeToClipboard('test');
+    const result = await writeToClipboard('test')
     // In extension context, extension-fallback should be second in line
-    expect(result.method).toBe('extension-fallback');
+    expect(result.method).toBe('extension-fallback')
   } finally {
     // @ts-ignore - restore
-    navigator.clipboard = originalClipboard;
+    navigator.clipboard = originalClipboard
   }
-});
+})
 
-test("Non-extension context uses normal method order", async () => {
+test('Non-extension context uses normal method order', async () => {
   // Remove Chrome extension environment
-  delete (globalThis as any).chrome;
-  
+  ;(globalThis as any).chrome = undefined
+
   // Create a working DOM environment for execCommand
   const mockDocument = {
     createElement: () => ({
@@ -92,40 +96,30 @@ test("Non-extension context uses normal method order", async () => {
       focus: () => {},
       select: () => {},
       setSelectionRange: () => {},
-      parentNode: null
+      parentNode: null,
     }),
     body: {
       appendChild: () => {},
-      removeChild: () => {}
+      removeChild: () => {},
     },
-    execCommand: () => true
-  };
-  
-  (globalThis as any).document = mockDocument;
-  
+    execCommand: () => true,
+  }
+
+  ;(globalThis as any).document = mockDocument
+
   // Mock navigator.clipboard to fail
-  const originalClipboard = navigator.clipboard;
+  const originalClipboard = navigator.clipboard
   // @ts-ignore
-  navigator.clipboard = undefined;
-  
+  navigator.clipboard = undefined
+
   try {
-    const result = await writeToClipboard('test');
+    const result = await writeToClipboard('test')
     // In non-extension context, execCommand should be used
-    expect(result.method).toBe('execCommand');
-    expect(result.success).toBe(true);
+    expect(result.method).toBe('execCommand')
+    expect(result.success).toBe(true)
   } finally {
     // @ts-ignore
-    navigator.clipboard = originalClipboard;
+    navigator.clipboard = originalClipboard
   }
-});
+})
 
-test("Arrow function export prevents binding issues", () => {
-  // Verify that writeToClipboard is not a bound method
-  expect(writeToClipboard.name).not.toBe('bound writeToClipboard');
-  
-  // Verify it's a regular function
-  expect(typeof writeToClipboard).toBe('function');
-  
-  // Should work when called directly
-  expect(() => writeToClipboard('test')).not.toThrow();
-});

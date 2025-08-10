@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chrome Extension Context Test</title>
+    <script>
+        // Simulate Chrome extension global context
+        globalThis.chrome = {
+            runtime: {
+                id: 'test-extension-id',
+                sendMessage: function(message, callback) {
+                    // Simulate the extension messaging
+                    setTimeout(() => {
+                        callback({ success: true });
+                    }, 100);
+                },
+                lastError: null
+            }
+        };
+    </script>
+</head>
+<body>
+    <h1>Chrome Extension Context Test</h1>
+    <button id="testSmall">Test Small Text</button>
+    <button id="testLarge">Test Large Text (Stack Overflow)</button>
+    <div id="results"></div>
+
+    <script type="module">
+        import { writeToClipboard } from './src/index.ts';
+
+        const results = document.getElementById('results');
+        
+        function log(message) {
+            const div = document.createElement('div');
+            div.textContent = `${new Date().toISOString()}: ${message}`;
+            results.appendChild(div);
+            console.log(message);
+        }
+
+        // Generate large text that causes issues
+        function generateLargeText(size = 50000) {
+            const lines = [];
+            for (let i = 0; i < size; i++) {
+                lines.push(`Log entry ${i}: This is a sample log message with some data ${Math.random()}`);
+            }
+            return lines.join('\n');
+        }
+
+        document.getElementById('testSmall').addEventListener('click', async () => {
+            try {
+                log('Testing small text...');
+                const result = await writeToClipboard('Hello World!');
+                log(`Small text result: ${JSON.stringify(result)}`);
+            } catch (error) {
+                log(`Small text error: ${error.message}`);
+            }
+        });
+
+        document.getElementById('testLarge').addEventListener('click', async () => {
+            try {
+                log('Testing large text...');
+                const largeText = generateLargeText(5000);
+                log(`Generated text of ${largeText.length} characters`);
+                
+                const result = await writeToClipboard(largeText);
+                log(`Large text result: ${JSON.stringify(result)}`);
+            } catch (error) {
+                log(`Large text error: ${error.message}`);
+                log(`Error stack: ${error.stack}`);
+            }
+        });
+
+        // Monitor for stack overflow errors
+        window.addEventListener('error', (event) => {
+            log(`Caught error: ${event.error?.message || event.message}`);
+            if (event.error?.stack) {
+                log(`Stack: ${event.error.stack.substring(0, 1000)}...`);
+            }
+        });
+    </script>
+</body>
+</html>
