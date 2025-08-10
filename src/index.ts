@@ -42,6 +42,9 @@ export class ClipboardManager {
     text: string,
     options: ClipboardOptions = {},
   ): Promise<ClipboardResult> {
+    // Detect Chrome extension context and optimize for it
+    const isExtensionContext = typeof globalThis.chrome !== 'undefined' && 
+                              globalThis.chrome?.runtime?.id
     const {
       identifier,
       timeout = 5000,
@@ -60,7 +63,7 @@ export class ClipboardManager {
         cancelled: true,
         identifier,
       }
-      if (callback) setTimeout(() => callback(result), 0)
+      if (callback) queueMicrotask(() => callback(result))
       return result
     }
 
@@ -69,11 +72,17 @@ export class ClipboardManager {
       const error = 'Invalid text provided for clipboard operation'
       logger?.('error', error, { identifier })
       const result = { success: false, error, identifier }
-      if (callback) setTimeout(() => callback(result), 0)
+      if (callback) queueMicrotask(() => callback(result))
       return result
     }
 
-    const methods = [
+    // Optimize method order for extension contexts to prevent stack overflow
+    const methods = isExtensionContext ? [
+      { name: 'navigator.clipboard', fn: this.writeWithClipboardAPI },
+      { name: 'extension-fallback', fn: this.writeWithExtensionFallback },
+      { name: 'execCommand', fn: this.writeWithExecCommand },
+      { name: 'webkit-fallback', fn: this.writeWithWebKitFallback },
+    ] : [
       { name: 'navigator.clipboard', fn: this.writeWithClipboardAPI },
       { name: 'execCommand', fn: this.writeWithExecCommand },
       { name: 'webkit-fallback', fn: this.writeWithWebKitFallback },
@@ -111,7 +120,7 @@ export class ClipboardManager {
             cancelled: true,
             identifier,
           }
-          if (callback) setTimeout(() => callback(cancelledResult), 0)
+          if (callback) queueMicrotask(() => callback(cancelledResult))
           return cancelledResult
         }
 
@@ -130,7 +139,7 @@ export class ClipboardManager {
           }
 
           if (callback) {
-            setTimeout(() => callback(finalResult), 0)
+            queueMicrotask(() => callback(finalResult))
           }
 
           return finalResult
@@ -143,7 +152,7 @@ export class ClipboardManager {
             cancelled: true,
             identifier,
           }
-          if (callback) setTimeout(() => callback(cancelledResult), 0)
+          if (callback) queueMicrotask(() => callback(cancelledResult))
           return cancelledResult
         }
 
@@ -161,7 +170,7 @@ export class ClipboardManager {
 
     const failedResult = { success: false, error, identifier }
     if (callback) {
-      setTimeout(() => callback(failedResult), 0)
+      queueMicrotask(() => callback(failedResult))
     }
 
     return failedResult
@@ -169,6 +178,7 @@ export class ClipboardManager {
 
   /**
    * Write using modern Clipboard API (2025 approach)
+   * Optimized for Chrome extension contexts to prevent stack overflow
    */
   private async writeWithClipboardAPI(
     text: string,
@@ -180,6 +190,20 @@ export class ClipboardManager {
 
     if (!navigator.clipboard?.writeText) {
       throw new Error('Clipboard API not available')
+    }
+
+    // For extension contexts, use direct approach to avoid Promise chain recursion
+    const isExtensionContext = typeof globalThis.chrome !== 'undefined' && 
+                              globalThis.chrome?.runtime?.id
+
+    if (isExtensionContext) {
+      // Direct call without additional Promise wrapping to prevent stack overflow
+      try {
+        await navigator.clipboard.writeText(text)
+        return { success: true }
+      } catch (error) {
+        throw error
+      }
     }
 
     if (signal) {
@@ -501,7 +525,8 @@ export class ClipboardManager {
 // Default instance for convenience
 export const clipboard = new ClipboardManager()
 
-// Export for backwards compatibility
-export const writeToClipboard = clipboard.writeToClipboard.bind(clipboard)
+// Export for backwards compatibility - avoid .bind() to prevent stack overflow in extensions
+export const writeToClipboard = (text: string, options?: ClipboardOptions) => 
+  clipboard.writeToClipboard(text, options)
 
 export default clipboard
