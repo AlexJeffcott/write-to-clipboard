@@ -1,6 +1,6 @@
 {
   "name": "@fairfox/write-to-clipboard",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Comprehensive clipboard utilities with multiple fallback methods for maximum browser compatibility",
   "main": "dist/index.js",
   "module": "dist/index.js",

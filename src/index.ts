@@ -51,13 +51,14 @@ export function getClipboard(): ClipboardAPI | undefined {
         read,
         readText,
         write,
-        writeText
+        writeText,
       }
-    } else if (isWriteSupported()) {
+    }
+    if (isWriteSupported()) {
       return {
         isWriteTextOnly: true,
         isFullySupported: false,
-        writeText
+        writeText,
       }
     }
   }
@@ -75,27 +76,23 @@ function isWriteSupported() {
 }
 
 function isFullySupported() {
-  return typeof navigator.clipboard.read === 'function'
-    && typeof navigator.clipboard.readText === 'function'
-    && typeof navigator.clipboard.write === 'function'
-    && typeof navigator.clipboard.writeText === 'function'
+  return (
+    typeof navigator.clipboard.read === 'function' &&
+    typeof navigator.clipboard.readText === 'function' &&
+    typeof navigator.clipboard.write === 'function' &&
+    typeof navigator.clipboard.writeText === 'function'
+  )
 }
 
 function read(): Promise<ClipboardItems> {
-  return readFromClipboard(
-    () => navigator.clipboard.read()
-  )
+  return readFromClipboard(() => navigator.clipboard.read())
 }
 
 function readText(): Promise<string> {
-  return readFromClipboard(
-    () => navigator.clipboard.readText()
-  )
+  return readFromClipboard(() => navigator.clipboard.readText())
 }
 
-async function readFromClipboard<T>(
-  read: () => Promise<T>
-): Promise<T> {
+async function readFromClipboard<T>(read: () => Promise<T>): Promise<T> {
   // NOTE: Firefox doesn't support `navigator.permissions.query`
   // NOTE: Safari doesn't have a permission for clipboard
   // SEE: https://developer.mozilla.org/en-US/docs/Web/API/Permissions/query
@@ -103,9 +100,9 @@ async function readFromClipboard<T>(
   let result: PermissionState
 
   try {
-    if (navigator.permissions && navigator.permissions.query) {
+    if (navigator.permissions?.query) {
       const status = await navigator.permissions.query({
-        name: 'clipboard-read' as PermissionName
+        name: 'clipboard-read' as PermissionName,
       })
 
       result = status.state
@@ -127,9 +124,8 @@ async function readFromClipboard<T>(
 
   if (result !== 'denied') {
     return read()
-  } else {
-    throw new Error('denied access to the clipboard')
   }
+  throw new Error('denied access to the clipboard')
 }
 
 // NOTE: https://bugs.webkit.org/show_bug.cgi?id=222262
@@ -141,8 +137,9 @@ async function write(data: string | PromiseLike<string>): Promise<void> {
   } else {
     try {
       const text = new ClipboardItem({
-        'text/plain': Promise.resolve(data)
-          .then(d => new Blob([d], { type: 'text/plain' }))
+        'text/plain': Promise.resolve(data).then(
+          (d) => new Blob([d], { type: 'text/plain' }),
+        ),
       })
       await navigator.clipboard.write([text])
     } catch (e) {
@@ -153,7 +150,10 @@ async function write(data: string | PromiseLike<string>): Promise<void> {
 }
 
 async function writeText(data: string | PromiseLike<string>): Promise<void> {
-  if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+  if (
+    !navigator.clipboard ||
+    typeof navigator.clipboard.writeText !== 'function'
+  ) {
     throw new Error('Clipboard API not available')
   }
 
@@ -221,40 +221,52 @@ export async function writeToClipboard(
   // Try modern Clipboard API first
   try {
     await writeText(text)
-    
-    const message = successMessage || `Written to clipboard: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`
+
+    const message =
+      successMessage ||
+      `Written to clipboard: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`
     logger?.('success', message, { identifier, method: 'navigator.clipboard' })
-    
-    return { 
-      success: true, 
-      method: 'navigator.clipboard', 
-      identifier 
+
+    return {
+      success: true,
+      method: 'navigator.clipboard',
+      identifier,
     }
   } catch (clipboardError) {
-    logger?.('warning', `Clipboard API failed: ${clipboardError instanceof Error ? clipboardError.message : String(clipboardError)}`, { identifier })
+    logger?.(
+      'warning',
+      `Clipboard API failed: ${clipboardError instanceof Error ? clipboardError.message : String(clipboardError)}`,
+      { identifier },
+    )
 
     // Try execCommand fallback
     try {
       await writeTextFallback(text)
-      
-      const message = successMessage || `Written to clipboard: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`
+
+      const message =
+        successMessage ||
+        `Written to clipboard: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`
       logger?.('success', message, { identifier, method: 'execCommand' })
-      
-      return { 
-        success: true, 
-        method: 'execCommand', 
-        identifier 
+
+      return {
+        success: true,
+        method: 'execCommand',
+        identifier,
       }
     } catch (fallbackError) {
-      logger?.('warning', `execCommand failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`, { identifier })
+      logger?.(
+        'warning',
+        `execCommand failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
+        { identifier },
+      )
 
       const error = errorMessage || 'All clipboard methods failed'
       logger?.('error', error, { identifier })
-      
-      return { 
-        success: false, 
-        error, 
-        identifier 
+
+      return {
+        success: false,
+        error,
+        identifier,
       }
     }
   }
@@ -262,7 +274,10 @@ export async function writeToClipboard(
 
 // For backwards compatibility
 export class ClipboardManager {
-  async writeToClipboard(text: string, options: ClipboardOptions = {}): Promise<ClipboardResult> {
+  async writeToClipboard(
+    text: string,
+    options: ClipboardOptions = {},
+  ): Promise<ClipboardResult> {
     return writeToClipboard(text, options)
   }
 }
