@@ -23,15 +23,3 @@ test('null text validation', async () => {
   expect(result.error).toContain('Invalid text provided')
 })
 
-test('cancelled operation', async () => {
-  const controller = new AbortController()
-  controller.abort()
-
-  const result = await writeToClipboard('test', {
-    signal: controller.signal,
-  })
-
-  expect(result.success).toBe(false)
-  expect(result.cancelled).toBe(true)
-  expect(result.error).toContain('Operation cancelled')
-})

@@ -1,15 +1,11 @@
 /**
- * Comprehensive Clipboard Implementation
- *
- * Non-blocking async implementation with AbortController signals for cancellation
- * Multiple fallback methods for maximum compatibility across environments
+ * Simple, modern clipboard utilities
+ * Focuses on actual browser compatibility issues without over-engineering
  */
 
 export interface ClipboardOptions {
   /** Optional identifier for tracking operations */
   identifier?: string
-  /** Timeout in milliseconds for operation */
-  timeout?: number
   /** Logger function for operation tracking */
   logger?: (
     level: 'success' | 'warning' | 'error',
@@ -20,10 +16,6 @@ export interface ClipboardOptions {
   successMessage?: string
   /** Custom error message */
   errorMessage?: string
-  /** AbortController signal for cancellation */
-  signal?: AbortSignal
-  /** Callback for operation result */
-  callback?: (result: ClipboardResult) => void
 }
 
 export interface ClipboardResult {
@@ -31,504 +23,249 @@ export interface ClipboardResult {
   method?: string
   error?: string
   identifier?: string
-  cancelled?: boolean
 }
 
-export class ClipboardManager {
-  /**
-   * Main clipboard function with multiple fallback methods and signal support
-   */
-  async writeToClipboard(
-    text: string,
-    options: ClipboardOptions = {},
-  ): Promise<ClipboardResult> {
-    // Detect Chrome extension context and optimize for it
-    const isExtensionContext =
-      typeof globalThis.chrome !== 'undefined' && globalThis.chrome?.runtime?.id
-    const {
-      identifier,
-      timeout = 5000,
-      logger,
-      successMessage,
-      errorMessage,
-      signal,
-      callback,
-    } = options
+export type ClipboardIsWriteTextOnly = {
+  isWriteTextOnly: true
+  isFullySupported: false
+  writeText: typeof writeText
+}
 
-    // Check if already cancelled
-    if (signal?.aborted) {
-      const result = {
-        success: false,
-        error: 'Operation cancelled',
-        cancelled: true,
-        identifier,
+export type ClipboardIsFullySupported = {
+  isWriteTextOnly: false
+  isFullySupported: true
+  read: typeof read
+  readText: typeof readText
+  write: typeof write
+  writeText: typeof writeText
+}
+
+export type ClipboardAPI = ClipboardIsWriteTextOnly | ClipboardIsFullySupported
+
+export function getClipboard(): ClipboardAPI | undefined {
+  if (isAvailable()) {
+    if (isFullySupported()) {
+      return {
+        isWriteTextOnly: false,
+        isFullySupported: true,
+        read,
+        readText,
+        write,
+        writeText
       }
-      if (callback) queueMicrotask(() => callback(result))
-      return result
-    }
-
-    // Validate input
-    if (!text || typeof text !== 'string') {
-      const error = 'Invalid text provided for clipboard operation'
-      logger?.('error', error, { identifier })
-      const result = { success: false, error, identifier }
-      if (callback) queueMicrotask(() => callback(result))
-      return result
-    }
-
-    // Optimize method order for extension contexts to prevent stack overflow
-    const methods = isExtensionContext
-      ? [
-          { name: 'navigator.clipboard', fn: this.writeWithClipboardAPI },
-          { name: 'extension-fallback', fn: this.writeWithExtensionFallback },
-          { name: 'execCommand', fn: this.writeWithExecCommand },
-          { name: 'webkit-fallback', fn: this.writeWithWebKitFallback },
-        ]
-      : [
-          { name: 'navigator.clipboard', fn: this.writeWithClipboardAPI },
-          { name: 'execCommand', fn: this.writeWithExecCommand },
-          { name: 'webkit-fallback', fn: this.writeWithWebKitFallback },
-          { name: 'extension-fallback', fn: this.writeWithExtensionFallback },
-        ]
-
-    for (const method of methods) {
-      try {
-        // Create timeout promise that respects abort signal
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          const timeoutId = setTimeout(
-            () => reject(new Error('Timeout')),
-            timeout,
-          )
-
-          signal?.addEventListener(
-            'abort',
-            () => {
-              clearTimeout(timeoutId)
-              reject(new Error('Operation cancelled'))
-            },
-            { once: true },
-          )
-        })
-
-        const result = await Promise.race([
-          method.fn.call(this, text, signal),
-          timeoutPromise,
-        ])
-
-        if (signal?.aborted) {
-          const cancelledResult = {
-            success: false,
-            error: 'Operation cancelled',
-            cancelled: true,
-            identifier,
-          }
-          if (callback) queueMicrotask(() => callback(cancelledResult))
-          return cancelledResult
-        }
-
-        if (result.success) {
-          const finalResult = {
-            ...result,
-            method: method.name,
-            identifier,
-          }
-
-          if (logger) {
-            const message =
-              successMessage ||
-              `Written to clipboard: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`
-            logger('success', message, { identifier, method: method.name })
-          }
-
-          if (callback) {
-            queueMicrotask(() => callback(finalResult))
-          }
-
-          return finalResult
-        }
-      } catch (error) {
-        if (signal?.aborted) {
-          const cancelledResult = {
-            success: false,
-            error: 'Operation cancelled',
-            cancelled: true,
-            identifier,
-          }
-          if (callback) queueMicrotask(() => callback(cancelledResult))
-          return cancelledResult
-        }
-
-        logger?.(
-          'warning',
-          `${method.name} failed: ${error instanceof Error ? error.message : String(error)}`,
-          { identifier },
-        )
+    } else if (isWriteSupported()) {
+      return {
+        isWriteTextOnly: true,
+        isFullySupported: false,
+        writeText
       }
     }
-
-    // All methods failed
-    const error = errorMessage || 'All clipboard methods failed'
-    logger?.('error', error, { identifier })
-
-    const failedResult = { success: false, error, identifier }
-    if (callback) {
-      queueMicrotask(() => callback(failedResult))
-    }
-
-    return failedResult
   }
 
-  /**
-   * Write using modern Clipboard API (2025 approach)
-   * Optimized for Chrome extension contexts to prevent stack overflow
-   */
-  private async writeWithClipboardAPI(
-    text: string,
-    signal?: AbortSignal,
-  ): Promise<ClipboardResult> {
-    if (signal?.aborted) {
-      throw new Error('Operation cancelled')
-    }
+  return undefined
+}
 
-    if (!navigator.clipboard?.writeText) {
-      throw new Error('Clipboard API not available')
-    }
+function isAvailable() {
+  return 'clipboard' in navigator
+}
 
-    // For extension contexts, use direct approach to avoid Promise chain recursion
-    const isExtensionContext =
-      typeof globalThis.chrome !== 'undefined' && globalThis.chrome?.runtime?.id
+// NOTE: Firefox only exposes clipboard.writeText()
+function isWriteSupported() {
+  return typeof navigator.clipboard.writeText === 'function'
+}
 
-    if (isExtensionContext) {
-      // Direct call without additional Promise wrapping to prevent stack overflow
-      await navigator.clipboard.writeText(text)
-      return { success: true }
-    }
+function isFullySupported() {
+  return typeof navigator.clipboard.read === 'function'
+    && typeof navigator.clipboard.readText === 'function'
+    && typeof navigator.clipboard.write === 'function'
+    && typeof navigator.clipboard.writeText === 'function'
+}
 
-    if (signal) {
-      return new Promise((resolve, reject) => {
-        signal.addEventListener(
-          'abort',
-          () => reject(new Error('Operation cancelled')),
-          { once: true },
-        )
+function read(): Promise<ClipboardItems> {
+  return readFromClipboard(
+    () => navigator.clipboard.read()
+  )
+}
 
-        navigator.clipboard
-          .writeText(text)
-          .then(() => resolve({ success: true }))
-          .catch(reject)
+function readText(): Promise<string> {
+  return readFromClipboard(
+    () => navigator.clipboard.readText()
+  )
+}
+
+async function readFromClipboard<T>(
+  read: () => Promise<T>
+): Promise<T> {
+  // NOTE: Firefox doesn't support `navigator.permissions.query`
+  // NOTE: Safari doesn't have a permission for clipboard
+  // SEE: https://developer.mozilla.org/en-US/docs/Web/API/Permissions/query
+
+  let result: PermissionState
+
+  try {
+    if (navigator.permissions && navigator.permissions.query) {
+      const status = await navigator.permissions.query({
+        name: 'clipboard-read' as PermissionName
       })
-    }
 
-    await navigator.clipboard.writeText(text)
-    return { success: true }
+      result = status.state
+    } else {
+      // NOTE: if it can't be queried, then it should Just Work™
+      result = 'granted'
+    }
+  } catch (e) {
+    if (e instanceof TypeError) {
+      // NOTE: a TypeError means we queried for a permission name that the
+      // browser is not aware of, which means there isn't a permission check for
+      // clipboard-read, so it should Just Work™
+      result = 'granted'
+    } else {
+      // NOTE: must have been an actual error
+      throw e
+    }
   }
 
-  /**
-   * Write using legacy document.execCommand with signal support
-   * Enhanced for WebKit/Safari compatibility
-   */
-  private async writeWithExecCommand(
-    text: string,
-    signal?: AbortSignal,
-  ): Promise<ClipboardResult> {
-    if (signal?.aborted) {
-      throw new Error('Operation cancelled')
-    }
-
-    return new Promise((resolve, reject) => {
-      if (signal) {
-        signal.addEventListener(
-          'abort',
-          () => {
-            reject(new Error('Operation cancelled'))
-          },
-          { once: true },
-        )
-      }
-
-      // Use setTimeout for better WebKit compatibility instead of requestAnimationFrame
-      setTimeout(() => {
-        let textArea: HTMLTextAreaElement | null = null
-
-        try {
-          if (signal?.aborted) {
-            reject(new Error('Operation cancelled'))
-            return
-          }
-
-          // Check if execCommand is supported (more thorough check for WebKit)
-          if (typeof document.execCommand !== 'function') {
-            reject(new Error('execCommand not available'))
-            return
-          }
-
-          textArea = document.createElement('textarea')
-          textArea.value = text
-
-          // Enhanced styling for WebKit compatibility
-          textArea.style.cssText = `
-            position: fixed !important;
-            top: -1000px !important;
-            left: -1000px !important;
-            width: 1px !important;
-            height: 1px !important;
-            padding: 0 !important;
-            border: none !important;
-            outline: none !important;
-            boxShadow: none !important;
-            background: transparent !important;
-            opacity: 0 !important;
-            pointer-events: none !important;
-            z-index: -1 !important;
-          `
-
-          // Remove readonly for better WebKit compatibility
-          textArea.removeAttribute('readonly')
-          textArea.setAttribute('tabindex', '0') // Make focusable
-
-          document.body.appendChild(textArea)
-
-          if (signal?.aborted) {
-            document.body.removeChild(textArea)
-            reject(new Error('Operation cancelled'))
-            return
-          }
-
-          // Enhanced selection for WebKit
-          textArea.focus()
-          textArea.select()
-
-          // Additional selection methods for WebKit
-          if (textArea.setSelectionRange) {
-            textArea.setSelectionRange(0, text.length)
-          }
-          if (textArea.select) {
-            textArea.select()
-          }
-
-          // Try multiple approaches for execCommand
-          let successful = false
-
-          try {
-            // First attempt: standard execCommand
-            successful = document.execCommand('copy')
-          } catch (e) {
-            // If that fails, try with different parameters
-            try {
-              successful = document.execCommand('copy', false, undefined)
-            } catch (e2) {
-              // Final attempt with explicit parameters
-              successful = document.execCommand('copy', false, undefined)
-            }
-          }
-
-          // Clean up
-          if (textArea?.parentNode) {
-            document.body.removeChild(textArea)
-          }
-
-          if (!successful) {
-            reject(new Error('execCommand copy returned false'))
-          } else {
-            resolve({ success: true })
-          }
-        } catch (error) {
-          // Ensure cleanup on error
-          if (textArea?.parentNode) {
-            try {
-              document.body.removeChild(textArea)
-            } catch (e) {
-              // Ignore cleanup errors
-            }
-          }
-          reject(error)
-        }
-      }, 0)
-    })
-  }
-
-  /**
-   * WebKit-specific fallback using button click approach
-   * This method works better in Safari by simulating user interaction
-   */
-  private async writeWithWebKitFallback(
-    text: string,
-    signal?: AbortSignal,
-  ): Promise<ClipboardResult> {
-    if (signal?.aborted) {
-      throw new Error('Operation cancelled')
-    }
-
-    return new Promise((resolve, reject) => {
-      if (signal) {
-        signal.addEventListener(
-          'abort',
-          () => {
-            reject(new Error('Operation cancelled'))
-          },
-          { once: true },
-        )
-      }
-
-      // Create a button element that triggers the copy on click
-      const button = document.createElement('button')
-      const textArea = document.createElement('textarea')
-
-      try {
-        // Setup textarea with text
-        textArea.value = text
-        textArea.style.cssText = `
-          position: fixed !important;
-          left: -9999px !important;
-          top: -9999px !important;
-          width: 1px !important;
-          height: 1px !important;
-          opacity: 0 !important;
-        `
-
-        // Setup button
-        button.style.cssText = `
-          position: fixed !important;
-          left: -9999px !important;
-          top: -9999px !important;
-          width: 1px !important;
-          height: 1px !important;
-          opacity: 0 !important;
-        `
-
-        document.body.appendChild(textArea)
-        document.body.appendChild(button)
-
-        if (signal?.aborted) {
-          document.body.removeChild(textArea)
-          document.body.removeChild(button)
-          reject(new Error('Operation cancelled'))
-          return
-        }
-
-        // Add click handler to button
-        const clickHandler = (e: Event) => {
-          e.preventDefault()
-
-          try {
-            textArea.focus()
-            textArea.select()
-
-            // Try different selection methods for WebKit
-            if (textArea.setSelectionRange) {
-              textArea.setSelectionRange(0, text.length)
-            }
-
-            const success = document.execCommand('copy')
-
-            // Cleanup
-            document.body.removeChild(textArea)
-            document.body.removeChild(button)
-
-            if (success) {
-              resolve({ success: true })
-            } else {
-              reject(new Error('Button copy method failed'))
-            }
-          } catch (error) {
-            // Cleanup on error
-            if (textArea.parentNode) document.body.removeChild(textArea)
-            if (button.parentNode) document.body.removeChild(button)
-            reject(error)
-          }
-        }
-
-        button.addEventListener('click', clickHandler, { once: true })
-
-        // Trigger the click programmatically
-        setTimeout(() => {
-          if (signal?.aborted) {
-            if (textArea.parentNode) document.body.removeChild(textArea)
-            if (button.parentNode) document.body.removeChild(button)
-            reject(new Error('Operation cancelled'))
-            return
-          }
-
-          button.click()
-        }, 0)
-      } catch (error) {
-        // Ensure cleanup
-        if (textArea.parentNode) {
-          try {
-            document.body.removeChild(textArea)
-          } catch (e) {}
-        }
-        if (button.parentNode) {
-          try {
-            document.body.removeChild(button)
-          } catch (e) {}
-        }
-        reject(error)
-      }
-    })
-  }
-
-  /**
-   * Write using Chrome extension-specific methods with signal support
-   */
-  private async writeWithExtensionFallback(
-    text: string,
-    signal?: AbortSignal,
-  ): Promise<ClipboardResult> {
-    if (signal?.aborted) {
-      throw new Error('Operation cancelled')
-    }
-
-    // Check if we're in an extension context
-    if (
-      typeof globalThis.chrome === 'undefined' ||
-      !globalThis.chrome?.runtime ||
-      !globalThis.chrome?.runtime?.id
-    ) {
-      throw new Error('Not in extension context')
-    }
-
-    return new Promise((resolve, reject) => {
-      if (signal) {
-        signal.addEventListener(
-          'abort',
-          () => {
-            reject(new Error('Operation cancelled'))
-          },
-          { once: true },
-        )
-      }
-
-      globalThis.chrome.runtime.sendMessage(
-        { action: 'writeToClipboard', text },
-        (response: { success?: boolean; error?: string }) => {
-          if (signal?.aborted) {
-            reject(new Error('Operation cancelled'))
-            return
-          }
-
-          if (globalThis.chrome.runtime.lastError) {
-            reject(new Error(globalThis.chrome.runtime.lastError.message))
-          } else if (response?.success) {
-            resolve({ success: true })
-          } else {
-            reject(new Error(response?.error || 'Extension clipboard failed'))
-          }
-        },
-      )
-    })
+  if (result !== 'denied') {
+    return read()
+  } else {
+    throw new Error('denied access to the clipboard')
   }
 }
 
-// Default instance for convenience
-export const clipboard = new ClipboardManager()
+// NOTE: https://bugs.webkit.org/show_bug.cgi?id=222262
+//       https://bugs.chromium.org/p/chromium/issues/detail?id=1014310
+//       https://w3c.github.io/clipboard-apis/#dom-clipboard-writetext
+async function write(data: string | PromiseLike<string>): Promise<void> {
+  if (typeof data === 'string') {
+    await writeText(data)
+  } else {
+    try {
+      const text = new ClipboardItem({
+        'text/plain': Promise.resolve(data)
+          .then(d => new Blob([d], { type: 'text/plain' }))
+      })
+      await navigator.clipboard.write([text])
+    } catch (e) {
+      console.error('could not write to the system clipboard', e)
+      throw e
+    }
+  }
+}
 
-// Export for backwards compatibility - create direct function to prevent stack overflow in extensions
-export function writeToClipboard(
+async function writeText(data: string | PromiseLike<string>): Promise<void> {
+  if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+    throw new Error('Clipboard API not available')
+  }
+
+  try {
+    await navigator.clipboard.writeText(await data)
+  } catch (e) {
+    console.error('could not write to the system clipboard', e)
+    throw e
+  }
+}
+
+// Simple execCommand fallback for older browsers
+async function writeTextFallback(text: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const textArea = document.createElement('textarea')
+    textArea.value = text
+    textArea.style.cssText = `
+      position: fixed;
+      top: -1000px;
+      left: -1000px;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      border: none;
+      outline: none;
+      background: transparent;
+    `
+
+    document.body.appendChild(textArea)
+    textArea.focus()
+    textArea.select()
+
+    try {
+      const successful = document.execCommand('copy')
+      document.body.removeChild(textArea)
+
+      if (successful) {
+        resolve()
+      } else {
+        reject(new Error('execCommand copy failed'))
+      }
+    } catch (error) {
+      document.body.removeChild(textArea)
+      reject(error)
+    }
+  })
+}
+
+/**
+ * Main clipboard write function - simple and reliable
+ */
+export async function writeToClipboard(
   text: string,
-  options?: ClipboardOptions,
+  options: ClipboardOptions = {},
 ): Promise<ClipboardResult> {
-  return clipboard.writeToClipboard(text, options)
+  const { identifier, logger, successMessage, errorMessage } = options
+
+  // Validate input
+  if (!text || typeof text !== 'string') {
+    const error = 'Invalid text provided for clipboard operation'
+    logger?.('error', error, { identifier })
+    return { success: false, error, identifier }
+  }
+
+  // Try modern Clipboard API first
+  try {
+    await writeText(text)
+    
+    const message = successMessage || `Written to clipboard: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`
+    logger?.('success', message, { identifier, method: 'navigator.clipboard' })
+    
+    return { 
+      success: true, 
+      method: 'navigator.clipboard', 
+      identifier 
+    }
+  } catch (clipboardError) {
+    logger?.('warning', `Clipboard API failed: ${clipboardError instanceof Error ? clipboardError.message : String(clipboardError)}`, { identifier })
+
+    // Try execCommand fallback
+    try {
+      await writeTextFallback(text)
+      
+      const message = successMessage || `Written to clipboard: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`
+      logger?.('success', message, { identifier, method: 'execCommand' })
+      
+      return { 
+        success: true, 
+        method: 'execCommand', 
+        identifier 
+      }
+    } catch (fallbackError) {
+      logger?.('warning', `execCommand failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`, { identifier })
+
+      const error = errorMessage || 'All clipboard methods failed'
+      logger?.('error', error, { identifier })
+      
+      return { 
+        success: false, 
+        error, 
+        identifier 
+      }
+    }
+  }
 }
 
+// For backwards compatibility
+export class ClipboardManager {
+  async writeToClipboard(text: string, options: ClipboardOptions = {}): Promise<ClipboardResult> {
+    return writeToClipboard(text, options)
+  }
+}
+
+export const clipboard = new ClipboardManager()
 export default clipboard
